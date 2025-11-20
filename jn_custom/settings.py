@@ -59,15 +59,20 @@ WSGI_APPLICATION = 'jn_custom.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'mssql',
-        'NAME': 'GerenciadorJN',
-        'USER': 'sa',
-        'PASSWORD': '@Senha123',  # Substitua pela senha real do SQL Server
-        'HOST': 'localhost',
+        'NAME': 'sistema-log',
+        'HOST': 'jotanunes.database.windows.net',
         'PORT': '1433',
+        'USER': 'jota123',
+        'PASSWORD': os.environ.get('AZURE_SQL_PASSWORD', '@Senha231'),
         'OPTIONS': {
             'driver': 'ODBC Driver 17 for SQL Server',
-            'unicode_results': True,
-            'extra_params': 'Encrypt=no;TrustServerCertificate=yes',
+            'extra_params': (
+                'Encrypt=yes;'
+                'TrustServerCertificate=no;'
+                'Connection Timeout=30;'
+                'Authentication=SqlPassword;'
+                'ServerSPN=MSSQLSvc/jotanunes.database.windows.net'
+            ),
         },
     },
     'django_internal': {
