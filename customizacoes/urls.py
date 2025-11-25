@@ -24,6 +24,8 @@ from .views import (
     HistoricoAlteracoesView,
     AdicionarObservacaoRegistroView,
     CompararRegistrosView,
+    NotificacoesView,
+    MarcarNotificacaoLidaView,
 )
 
 # ============================================================================
@@ -73,4 +75,10 @@ urlpatterns = [
     # OBSERVAÇÕES - Observation operations
     # ========================================================================
     path('adicionar-observacao-registro/', AdicionarObservacaoRegistroView.as_view(), name='adicionar-observacao-registro'),
+    
+    # ========================================================================
+    # NOTIFICAÇÕES - Alertas unificados das tabelas AUD
+    # ========================================================================
+    path('notificacoes/', NotificacoesView.as_view(), name='notificacoes'),
+    path('notificacoes/<str:uid>/marcar_lida/', MarcarNotificacaoLidaView.as_view(), name='notificacoes-marcar-lida'),
 ]

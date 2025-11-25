@@ -6,8 +6,10 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.views import APIView
 from django.db import transaction
 from django.db.models import Count, Q
+from django.db.models.functions import Coalesce
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 from .models import (
     CustomizacaoFV, CustomizacaoSQL, CustomizacaoReport,
     CadastroDependencias
@@ -1161,3 +1163,188 @@ class CompararRegistrosView(APIView):
                 {"error": f"Erro ao buscar registros: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class NotificacoesView(APIView):
+    """
+    Consolida registros das tabelas AUD como notificações.
+    Cada registro expõe título, descrição, prioridade, data e status de leitura.
+    """
+
+    DEFAULT_LIMIT = 120
+    MAX_LIMIT = 300
+
+    TIPO_MAP = {
+        'sql': {
+            'tabela': 'AUD_SQL',
+            'id_field': 'codsentenca',
+            'label': 'SQL'
+        },
+        'report': {
+            'tabela': 'AUD_REPORT',
+            'id_field': 'id',
+            'label': 'REPORT'
+        },
+        'fv': {
+            'tabela': 'AUD_FV',
+            'id_field': 'id',
+            'label': 'FV'
+        }
+    }
+
+    def get(self, request):
+        limit = self._sanitize_limit(request.query_params.get('limit'))
+        somente_nao_lidas = request.query_params.get('somente_nao_lidas', 'false').lower() == 'true'
+
+        notificacoes = []
+        notificacoes.extend(self._build_from_queryset(CustomizacaoSQL, 'sql', somente_nao_lidas))
+        notificacoes.extend(self._build_from_queryset(CustomizacaoReport, 'report', somente_nao_lidas))
+        notificacoes.extend(self._build_from_queryset(CustomizacaoFV, 'fv', somente_nao_lidas))
+
+        notificacoes.sort(key=lambda n: n['ordenacao'], reverse=True)
+
+        # Remove campo interno de ordenação e aplica o limite global
+        resposta = []
+        for notif in notificacoes[:limit]:
+            notif.pop('ordenacao', None)
+            resposta.append(notif)
+
+        return Response(resposta)
+
+    def _sanitize_limit(self, raw_limit):
+        try:
+            parsed = int(raw_limit)
+        except (TypeError, ValueError):
+            return self.DEFAULT_LIMIT
+        return max(1, min(parsed, self.MAX_LIMIT))
+
+    def _build_from_queryset(self, model, tipo, somente_nao_lidas):
+        config = self.TIPO_MAP[tipo]
+        queryset = model.objects.annotate(
+            data_ref=Coalesce('recmodifiedon', 'reccreatedon')
+        ).order_by('-data_ref')[:self.MAX_LIMIT]
+
+        notif_list = []
+        for registro in queryset:
+            lida = bool(getattr(registro, 'lida', 0))
+            if somente_nao_lidas and lida:
+                continue
+            notif = self._serialize_registro(registro, tipo, config)
+            notif_list.append(notif)
+        return notif_list
+
+    def _serialize_registro(self, registro, tipo, config):
+        registro_id = getattr(registro, config['id_field'])
+        tabela = config['tabela']
+        titulo, descricao = self._resolver_titulo_descricao(registro, tipo, registro_id)
+        prioridade = self._normalizar_prioridade(getattr(registro, 'prioridade', None))
+        data_base = getattr(registro, 'data_ref', None) or getattr(registro, 'recmodifiedon', None) or getattr(registro, 'reccreatedon', None) or timezone.now()
+        if timezone.is_naive(data_base):
+            data_base = timezone.make_aware(data_base, timezone.get_default_timezone())
+
+        responsavel = getattr(registro, 'recmodifiedby', None) or getattr(registro, 'reccreatedby', None) or 'Sistema'
+
+        return {
+            'id': f"{tipo}-{registro_id}",
+            'registro_id': registro_id,
+            'tabela': tabela,
+            'titulo': titulo,
+            'descricao': descricao,
+            'prioridade': prioridade,
+            'lida': bool(getattr(registro, 'lida', 0)),
+            'data_hora': data_base.isoformat(),
+            'responsavel': responsavel,
+            'origem': config['label'],
+            'ordenacao': data_base.timestamp()
+        }
+
+    def _resolver_titulo_descricao(self, registro, tipo, registro_id):
+        if tipo == 'sql':
+            titulo = registro.titulo or f"SQL {registro_id}"
+            descricao = registro.observacao or registro.sentenca or 'Sem descrição disponível.'
+        elif tipo == 'report':
+            titulo = registro.codigo or f"Report {registro_id}"
+            descricao = registro.descricao or registro.observacao or 'Sem descrição disponível.'
+        else:  # fv
+            titulo = registro.nome or f"FV {registro_id}"
+            descricao = registro.descricao or registro.observacao or 'Sem descrição disponível.'
+        return titulo, self._truncate(descricao)
+
+    def _truncate(self, texto, limite=280):
+        if not texto:
+            return 'Sem descrição disponível.'
+        texto = str(texto).strip()
+        if len(texto) <= limite:
+            return texto
+        return f"{texto[:limite-3]}..."
+
+    def _normalizar_prioridade(self, valor):
+        if not valor:
+            return 'Baixa'
+        valor = str(valor).strip().capitalize()
+        if valor.lower() in ['alta', 'média', 'media', 'baixa']:
+            if valor.lower() == 'media':
+                return 'Média'
+            return valor
+        return 'Baixa'
+
+
+class MarcarNotificacaoLidaView(APIView):
+    """
+    Atualiza o campo 'lida' diretamente nas tabelas AUD de origem.
+    Recebe o identificador composto (ex.: sql-123) via URL.
+    """
+
+    def post(self, request, uid):
+        tipo, registro_id = self._parse_uid(uid)
+        if not tipo:
+            return Response(
+                {"error": "Identificador inválido. Use o formato <tipo>-<id>."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        model_info = NotificacoesView.TIPO_MAP.get(tipo)
+        if not model_info:
+            return Response(
+                {"error": f"Tipo '{tipo}' não suportado."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        model = self._resolver_modelo(tipo)
+        lookup_field = model_info['id_field']
+        filtro = {lookup_field: registro_id}
+
+        registro = model.objects.filter(**filtro).first()
+        if not registro:
+            return Response(
+                {"error": f"Registro {registro_id} não encontrado em {model_info['tabela']}."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        registro.lida = 1
+        registro.save(update_fields=['lida'])
+
+        return Response({
+            "success": True,
+            "uid": uid,
+            "registro_id": registro_id,
+            "tabela": model_info['tabela']
+        })
+
+    def _parse_uid(self, uid):
+        if not uid or '-' not in uid:
+            return None, None
+        tipo, registro_id = uid.split('-', 1)
+        tipo = tipo.lower()
+        try:
+            registro_id = int(registro_id)
+        except ValueError:
+            return None, None
+        return tipo, registro_id
+
+    def _resolver_modelo(self, tipo):
+        if tipo == 'sql':
+            return CustomizacaoSQL
+        if tipo == 'report':
+            return CustomizacaoReport
+        return CustomizacaoFV
