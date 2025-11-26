@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
 
 # Instalar dependências e mssql-tools + drivers ODBC
 RUN apt-get update && \
