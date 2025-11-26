@@ -20,3 +20,6 @@ COPY . .
 EXPOSE 8000
 
 CMD gunicorn jn_custom.wsgi:application --bind 0.0.0.0:${PORT:-8000}
+
+RUN odbcinst -q -d
+RUN ls -l /opt/microsoft/msodbcsql18/lib64/
