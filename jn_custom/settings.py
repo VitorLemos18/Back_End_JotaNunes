@@ -65,7 +65,7 @@ DATABASES = {
         'USER': 'jota123',
         'PASSWORD': os.environ.get('AZURE_SQL_PASSWORD', '@Senha231'),
         'OPTIONS': {
-            'driver': 'ODBC Driver 17 for SQL Server',
+            'driver': 'ODBC Driver 18 for SQL Server',
             'extra_params': (
                 'Encrypt=yes;'
                 'TrustServerCertificate=no;'
