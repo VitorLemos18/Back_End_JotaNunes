@@ -1,8 +1,13 @@
-FROM mcr.microsoft.com/mssql-tools/python:3.11
+FROM python:3.11-slim
 
-# Instalar dependências essenciais
+# Instalar dependências e mssql-tools + drivers ODBC
 RUN apt-get update && \
-    apt-get install -y unixodbc unixodbc-dev && \
+    apt-get install -y curl gnupg unixodbc unixodbc-dev && \
+    curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - && \
+    curl https://packages.microsoft.com/config/debian/12/prod.list > /etc/apt/sources.list.d/mssql-release.list && \
+    apt-get update && \
+    ACCEPT_EULA=Y apt-get install -y msodbcsql18 mssql-tools18 && \
+    echo 'export PATH="$PATH:/opt/mssql-tools18/bin"' >> ~/.bashrc && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
