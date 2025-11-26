@@ -12,5 +12,3 @@ services:
         value: "True"
       - key: ALLOWED_HOSTS
         value: "localhost,127.0.0.1,*"
-
-

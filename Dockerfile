@@ -20,16 +20,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copiar código da aplicação
 COPY . .
 
-# Copiar e tornar executável o script de entrada
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
-# Coletar arquivos estáticos
-RUN python manage.py collectstatic --noinput || true
-
 # Expor porta
 EXPOSE 8000
 
-# Usar script de entrada
-ENTRYPOINT ["/entrypoint.sh"]
+# Iniciar servidor
+CMD gunicorn jn_custom.wsgi:application --bind 0.0.0.0:${PORT:-8000}
 
