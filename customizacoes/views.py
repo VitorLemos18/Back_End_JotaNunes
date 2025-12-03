@@ -1236,7 +1236,7 @@ class NotificacoesView(APIView):
     def _serialize_registro(self, registro, tipo, config):
         registro_id = getattr(registro, config['id_field'])
         tabela = config['tabela']
-        titulo, descricao = self._resolver_titulo_descricao(registro, tipo, registro_id)
+        titulo, descricao = self._resolver_titulo_descricao(registro, tipo, registro_id, config)
         prioridade = self._normalizar_prioridade(getattr(registro, 'prioridade', None))
         data_base = getattr(registro, 'data_ref', None) or getattr(registro, 'recmodifiedon', None) or getattr(registro, 'reccreatedon', None) or timezone.now()
         if timezone.is_naive(data_base):
@@ -1258,17 +1258,30 @@ class NotificacoesView(APIView):
             'ordenacao': data_base.timestamp()
         }
 
-    def _resolver_titulo_descricao(self, registro, tipo, registro_id):
+    def _resolver_titulo_descricao(self, registro, tipo, registro_id, config):
+        # Determina se foi criação ou modificação
+        foi_modificado = getattr(registro, 'recmodifiedon', None) is not None
+        acao = "modificado" if foi_modificado else "criado"
+        
         if tipo == 'sql':
-            titulo = registro.titulo or f"SQL {registro_id}"
-            descricao = registro.observacao or registro.sentenca or 'Sem descrição disponível.'
+            nome_registro = registro.titulo or f"SQL {registro_id}"
+            titulo = f"Alteração em {config['label']}: {nome_registro}"
+            descricao = f"Registro {acao} na tabela {config['tabela']}"
+            if registro.observacao:
+                descricao += f" - {self._truncate(registro.observacao, 100)}"
         elif tipo == 'report':
-            titulo = registro.codigo or f"Report {registro_id}"
-            descricao = registro.descricao or registro.observacao or 'Sem descrição disponível.'
+            nome_registro = registro.codigo or f"Report {registro_id}"
+            titulo = f"Alteração em {config['label']}: {nome_registro}"
+            descricao = f"Registro {acao} na tabela {config['tabela']}"
+            if registro.observacao:
+                descricao += f" - {self._truncate(registro.observacao, 100)}"
         else:  # fv
-            titulo = registro.nome or f"FV {registro_id}"
-            descricao = registro.descricao or registro.observacao or 'Sem descrição disponível.'
-        return titulo, self._truncate(descricao)
+            nome_registro = registro.nome or f"FV {registro_id}"
+            titulo = f"Alteração em {config['label']}: {nome_registro}"
+            descricao = f"Registro {acao} na tabela {config['tabela']}"
+            if registro.observacao:
+                descricao += f" - {self._truncate(registro.observacao, 100)}"
+        return titulo, descricao
 
     def _truncate(self, texto, limite=280):
         if not texto:
